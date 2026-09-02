@@ -9,10 +9,15 @@ from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 🎯 全局默认地区设置 (如果想要永久换地区，只改这里！)
-# 支持多个地区，用逗号隔开，例如 "SJC,LAX,HKG,FRA"
+# 支持多个地区，用逗号隔开，例如 "SJC,LAX,HKG,FRA,NRT"
 # 💡 新手不知道有什么地区？可以直接填 "ALL"，系统会全区盲扫并自动创建所有能扫到的地区子域名！
 # ==========================================
-DEFAULT_REGIONS = "SJC,LAX,FRA,NRT"
+DEFAULT_REGIONS = "SJC"
+
+# 🌐 主域名终极大汇总同步开关
+# 设置为 "YES": 开启！将所有扫到的极品节点汇总推送到你的主域名（全球负载均衡）
+# 设置为 "NO": 关闭！仅同步到各个地区子域名，不修改主域名的解析记录
+SYNC_MAIN_DOMAIN = "NO"
 # ==========================================
 
     # === Cloudflare IPv4 Ranges (IP段配置区) ===
@@ -285,9 +290,12 @@ def main():
             print(f"\nSkipping Cloudflare DNS Sync for {region} (Missing Credentials).")
                 
     if can_sync and all_best_ips:
-        all_best_ips.sort(key=lambda x: x["latency"])
-        print(f"\n[Global Sync] Starting Cloudflare DNS Sync for MAIN DOMAIN: {base_domain}")
-        sync_to_cloudflare(api_token, zone_id, base_domain, all_best_ips, cf_email)
+        if SYNC_MAIN_DOMAIN.strip().upper() == "YES":
+            all_best_ips.sort(key=lambda x: x["latency"])
+            print(f"\n[Global Sync] Starting Cloudflare DNS Sync for MAIN DOMAIN: {base_domain}")
+            sync_to_cloudflare(api_token, zone_id, base_domain, all_best_ips, cf_email)
+        else:
+            print(f"\n[Global Sync] Skipped synchronizing to MAIN DOMAIN ({base_domain}) because SYNC_MAIN_DOMAIN is set to NO.")
 
     if total_found == 0:
         print("No valid IPs found in this scan across any regions. Aborting.")

@@ -2,8 +2,8 @@ name: Cloudflare IP Auto Scanner & Sync
 
 on:
   schedule:
-    # 每天北京时间早上 5 点 (UTC 时间 21:00) 自动运行
-    - cron: '0 21 * * *'
+    # 每天北京时间早上 5:00 (UTC 时间 21:00) 自动运行，避开 GitHub 整点排队高峰期
+    - cron: '00 21 * * *'
   # Allow manual trigger from the GitHub Actions tab
   workflow_dispatch:
 
