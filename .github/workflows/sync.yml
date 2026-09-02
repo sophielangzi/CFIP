@@ -12,49 +12,27 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Sync and Overwrite with Upstream
+      - name: Sync with Upstream via Server API
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
 
-          # 1. 配置 Git 身份
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-
-          # 2. 动态读取当前主分支名称
+          # 1. 动态获取当前仓库的主分支
           BRANCH=$(gh api "repos/${{ github.repository }}" --jq '.default_branch')
           echo "当前主分支: ${BRANCH}"
 
-          # 3. 尝试优先使用 API 无缝合并
+          # 2. 调用 GitHub 云端 API 自动合并（绕过 git push 的 workflow 文件权限拦截）
+          echo "正在向 GitHub 服务器发送同步请求..."
+          
           RESPONSE=$(gh api repos/${{ github.repository }}/merge-upstream -f branch="${BRANCH}" 2>&1 || true)
 
-          if echo "${RESPONSE}" | grep -q "Successfully fetched and merged"; then
-            echo "🎉 API 自动合并成功！"
-            exit 0
-          elif echo "${RESPONSE}" | grep -q "up to date"; then
-            echo "✅ 代码已是最新，无需更新。"
-            exit 0
+          echo "服务端响应结果: ${RESPONSE}"
+
+          # 3. 精准校验 API 响应状态
+          if echo "${RESPONSE}" | grep -qE "Successfully fetched and merged|up to date|merge_type"; then
+            echo "🎉 自动同步成功！原作者最新代码（包含工作流更新）已融合进你的仓库。"
+          else
+            echo "❌ 同步出现未知异常: ${RESPONSE}"
+            exit 1
           fi
-
-          # 4. 若 API 因代码冲突拒绝合并，启动强行以原作者代码为准的覆盖逻辑
-          echo "⚠️ 监测到代码冲突或 API 无法合并，启动强制对齐原作者（Upstream）模式..."
-
-          UPSTREAM_URL=$(gh api "repos/${{ github.repository }}" --jq '.parent.clone_url')
-
-          git remote remove upstream 2>/dev/null || true
-          git remote add upstream "${UPSTREAM_URL}"
-          git fetch upstream "${BRANCH}"
-
-          # 5. 强行重置本地分支，无条件丢弃冲突改动，完全以原作者代码为准
-          git reset --hard "upstream/${BRANCH}"
-
-          # 6. 带权限强行推送到你的仓库
-          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "${BRANCH}" --force
-
-          echo "🚀 冲突已解决：已强制使用原作者代码覆盖并更新！"
