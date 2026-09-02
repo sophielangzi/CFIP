@@ -2,8 +2,11 @@ name: Sync Fork
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天北京时间上午 8:00 自动运行
-  workflow_dispatch:     # 支持手动触发
+    - cron: '0 0 * * *'  # 每天北京时间 8:00 自动运行
+  workflow_dispatch:     # 支持手动运行
+
+permissions:
+  contents: write
 
 jobs:
   sync:
@@ -18,25 +21,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 自动获取当前仓库默认分支（main 或 master）
-          DEFAULT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          
-          # 通过 GitHub API 自动查询当前仓库对应的上游原作者仓库克隆地址
-          UPSTREAM_URL=$(gh api repos/${{ github.repository }} --jq '.parent.clone_url')
+          # 1. 自动获取 Fork 对应的上游地址
+          UPSTREAM_URL=$(gh api repos/${{ github.repository }} --jq '.parent.clone_url' 2>/dev/null || true)
           
           if [ -z "$UPSTREAM_URL" ] || [ "$UPSTREAM_URL" == "null" ]; then
-            echo "错误：当前仓库不是 Fork 仓库或无法获取上游地址。"
+            echo "错误：未能自动获取上游地址，请确认此仓库是 Fork 仓库。"
             exit 1
           fi
-          
-          echo "自动识别到上游仓库地址: $UPSTREAM_URL"
-          echo "当前分支: $DEFAULT_BRANCH"
-          
+
+          # 2. 获取当前分支名称
+          DEFAULT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          
-          git remote add upstream "$UPSTREAM_URL"
+
+          # 3. 添加上游源并 Fetch
+          git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
           git fetch upstream
+
+          # 4. 获取上游的主分支名字
+          UPSTREAM_BRANCH=$(git remote show upstream | sed -n '/HEAD branch/s/.*: //p')
+
+          # 5. 尝试平滑合并；若遇到冲突，优先采用上游(theirs)的代码，防止报错退出
           git checkout "$DEFAULT_BRANCH"
-          git merge "upstream/$DEFAULT_BRANCH" --no-edit || git merge "upstream/$DEFAULT_BRANCH" --allow-unrelated-histories --no-edit
-          git push origin "$DEFAULT_BRANCH"
+          git merge "upstream/$UPSTREAM_BRANCH" -X theirs --no-edit || {
+            echo "发生严重冲突，采用强制覆盖同步策略..."
+            git reset --hard "upstream/$UPSTREAM_BRANCH"
+          }
+
+          # 6. 推送回你自己的仓库
+          git push origin "$DEFAULT_BRANCH" --force
