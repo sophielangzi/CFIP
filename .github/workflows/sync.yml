@@ -12,42 +12,47 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Sync Upstream
+      - name: Universal Sync Engine
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 开启详细日志，方便查看运行过程
-          set -x
+          # 开启脚本严格模式，遇到错误立刻阻断并输出确切行数
+          set -e
 
-          # 1. 配置 Git 机器人身份
+          # 1. 配置 Git 身份
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-          # 2. 自动获取 Fork 上游克隆地址
-          UPSTREAM_URL=$(gh api "repos/${{ github.repository }}" --jq '.parent.clone_url')
+          # 2. 动态读取当前仓库的分支名称（ main 或 master 自动匹配 ）
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "当前运行分支: ${CURRENT_BRANCH}"
 
-          if [ -z "$UPSTREAM_URL" ] || [ "$UPSTREAM_URL" == "null" ]; then
-            echo "错误：无法自动获取上游仓库地址，请确认当前仓库是通过 Fork 创建的。"
+          # 3. 通过 GitHub API 获取 Fork 原作者的上游 Clone 地址
+          UPSTREAM_URL=$(gh api "repos/${{ github.repository }}" --jq '.parent.clone_url' 2>/dev/null || true)
+
+          if [ -z "${UPSTREAM_URL}" ] || [ "${UPSTREAM_URL}" = "null" ]; then
+            echo "❌ 错误: 未能识别上游仓库，请确认当前仓库是通过 GitHub 官方 Fork 出来的。"
             exit 1
           fi
+          echo "✅ 上游仓库地址: ${UPSTREAM_URL}"
 
-          # 3. 注入认证 Token，彻底解决推送权限问题
+          # 4. 防覆盖设置：清理已有的 upstream 避免重复添加引发报错
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "${UPSTREAM_URL}"
+
+          # 5. 拉取上游对应分支的最新代码
+          git fetch upstream "${CURRENT_BRANCH}"
+
+          # 6. 强制重置本地分支，100% 对齐上游，彻底消除 ahead/behind 代码冲突
+          git reset --hard "upstream/${CURRENT_BRANCH}"
+
+          # 7. 写入带有写权限的 Token 链接，强行推送到你个人仓库
           git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push origin "${CURRENT_BRANCH}" --force
 
-          # 4. 添加并拉取上游最新代码
-          git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
-          git fetch upstream --prune
-
-          # 5. 原生识别上游默认分支（核心修复点：不依赖任何文本截取）
-          git remote set-head upstream -a
-
-          # 6. 强制重置本地代码对齐上游主分支
-          git reset --hard upstream/HEAD
-
-          # 7. 强制推送到你自己的仓库
-          git push origin HEAD --force
+          echo "🎉 仓库已成功强制覆盖同步至最新版本！"
