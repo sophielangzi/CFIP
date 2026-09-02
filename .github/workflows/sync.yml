@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  workflows: write       # 核心：允许脚本修改和推送 .github/workflows 目录下的工作流文件
 
 jobs:
   sync:
@@ -17,42 +18,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Universal Sync Engine
+      - name: Sync Upstream Engine
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 开启脚本严格模式，遇到错误立刻阻断并输出确切行数
           set -e
 
           # 1. 配置 Git 身份
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-          # 2. 动态读取当前仓库的分支名称（ main 或 master 自动匹配 ）
-          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          echo "当前运行分支: ${CURRENT_BRANCH}"
+          # 2. 读取当前分支名
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-          # 3. 通过 GitHub API 获取 Fork 原作者的上游 Clone 地址
-          UPSTREAM_URL=$(gh api "repos/${{ github.repository }}" --jq '.parent.clone_url' 2>/dev/null || true)
+          # 3. 获取 Fork 上游仓库地址
+          UPSTREAM_URL=$(gh api "repos/${{ github.repository }}" --jq '.parent.clone_url')
 
-          if [ -z "${UPSTREAM_URL}" ] || [ "${UPSTREAM_URL}" = "null" ]; then
-            echo "❌ 错误: 未能识别上游仓库，请确认当前仓库是通过 GitHub 官方 Fork 出来的。"
+          if [ -z "$UPSTREAM_URL" ] || [ "$UPSTREAM_URL" = "null" ]; then
+            echo "错误：未能识别上游仓库，请确认当前仓库是通过 Fork 创建的。"
             exit 1
           fi
-          echo "✅ 上游仓库地址: ${UPSTREAM_URL}"
 
-          # 4. 防覆盖设置：清理已有的 upstream 避免重复添加引发报错
+          # 4. 配置上游并 Fetch 代码
           git remote remove upstream 2>/dev/null || true
-          git remote add upstream "${UPSTREAM_URL}"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream "$BRANCH"
 
-          # 5. 拉取上游对应分支的最新代码
-          git fetch upstream "${CURRENT_BRANCH}"
+          # 5. 强制重置本地代码对齐上游
+          git reset --hard "upstream/$BRANCH"
 
-          # 6. 强制重置本地分支，100% 对齐上游，彻底消除 ahead/behind 代码冲突
-          git reset --hard "upstream/${CURRENT_BRANCH}"
-
-          # 7. 写入带有写权限的 Token 链接，强行推送到你个人仓库
-          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          git push origin "${CURRENT_BRANCH}" --force
-
-          echo "🎉 仓库已成功强制覆盖同步至最新版本！"
+          # 6. 带 Token 强制推送到个人仓库
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$BRANCH" --force
