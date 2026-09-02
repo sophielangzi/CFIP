@@ -3,7 +3,7 @@ name: Sync Fork
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天北京时间 8:00 自动运行
-  workflow_dispatch:     # 支持手动运行
+  workflow_dispatch:     # 支持手动点击运行
 
 permissions:
   contents: write
@@ -17,36 +17,54 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sync Upstream
+      - name: Sync Upstream Repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 1. 配置 Git 机器人身份
+          # 1. 设置 Git 身份信息
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-          # 2. 通过 API 精准提取原作者仓库地址
-          REPO_INFO=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}")
-          UPSTREAM_URL=$(echo "$REPO_INFO" | jq -r '.parent.clone_url // empty')
+          # 2. 获取当前分支名字 (main 或 master)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "当前运行分支: $BRANCH"
+
+          # 3. 第一重保障：尝试 GitHub 官方原生 Fork 同步 (等同于网页端 Sync fork 按钮)
+          echo "尝试调用 GitHub 官方原生同步机制..."
+          if gh repo sync ${{ github.repository }} -b "$BRANCH"; then
+            echo "官方原生同步成功完成！"
+            exit 0
+          fi
+
+          echo "原生同步遇到代码历史冲突，启动第二重 Git 强制覆盖模式..."
+
+          # 4. 第二重保障：补全 User-Agent 与 Bearer 请求头，精准获取上游地址
+          UPSTREAM_URL=$(curl -sL \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "User-Agent: GitHubActions-Workflow" \
+            "https://api.github.com/repos/${{ github.repository }}" \
+            | jq -r '.parent.clone_url // empty')
+
+          echo "成功识别到上游地址: $UPSTREAM_URL"
 
           if [ -z "$UPSTREAM_URL" ]; then
-            echo "错误：未能识别到上游仓库，请确认此仓库是通过 Fork 创建的。"
+            echo "错误：未能识别到上游地址，请检查该仓库是否为 Fork 仓库。"
             exit 1
           fi
 
-          echo "识别到上游地址: $UPSTREAM_URL"
-
-          # 3. 配置带 Token 的远程推送链接
+          # 5. 配置带 Token 认证的远程 origin 地址，解决 push 权限问题
           git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
 
-          # 4. 拉取上游最新代码
+          # 6. 拉取上游最新代码并强行覆盖本地冲突
           git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
           git fetch upstream
 
-          # 5. 识别分支并强制对齐覆盖
-          BRANCH=$(git rev-parse --abbrev-ref HEAD)
           UPSTREAM_BRANCH=$(git remote show upstream | sed -n '/HEAD branch/s/.*: //p')
 
           git checkout "$BRANCH"
           git reset --hard "upstream/$UPSTREAM_BRANCH"
 
-          # 6. 强行推送到你的仓库
+          # 7. 强制推送到你的仓库
           git push origin "$BRANCH" --force
+          echo "强行覆盖同步完成！"
