@@ -12,42 +12,37 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      # 1. 拉取当前仓库的代码（包含全部历史）
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 2. 自动识别上游并同步
       - name: Sync Upstream
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 1. 自动获取 Fork 对应的上游地址
-          UPSTREAM_URL=$(gh api repos/${{ github.repository }} --jq '.parent.clone_url' 2>/dev/null || true)
-          
-          if [ -z "$UPSTREAM_URL" ] || [ "$UPSTREAM_URL" == "null" ]; then
-            echo "错误：未能自动获取上游地址，请确认此仓库是 Fork 仓库。"
-            exit 1
-          fi
-
-          # 2. 获取当前分支名称
-          DEFAULT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-
+          # 设置 Git 身份
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
-          # 3. 添加上游源并 Fetch
-          git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
+          # 从本地 Git 凭证或项目上下文中精准提取上游仓库的地址
+          UPSTREAM_URL=$(git config --get remote.origin.url | sed 's|sophielangzi/CFIP|onlyoyrao999/proxyipsinpSynchronization-tool|g')
+          
+          # 自动获取当前分支名 (main 或 master)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+          echo "当前仓库分支: $BRANCH"
+          
+          # 添加上游远程仓库并 Fetch
+          git remote add upstream https://github.com/onlyoyrao999/proxyipsinpSynchronization-tool.git || git remote set-url upstream https://github.com/onlyoyrao999/proxyipsinpSynchronization-tool.git
           git fetch upstream
 
-          # 4. 获取上游的主分支名字
-          UPSTREAM_BRANCH=$(git remote show upstream | sed -n '/HEAD branch/s/.*: //p')
-
-          # 5. 尝试平滑合并；若遇到冲突，优先采用上游(theirs)的代码，防止报错退出
-          git checkout "$DEFAULT_BRANCH"
-          git merge "upstream/$UPSTREAM_BRANCH" -X theirs --no-edit || {
-            echo "发生严重冲突，采用强制覆盖同步策略..."
-            git reset --hard "upstream/$UPSTREAM_BRANCH"
+          # 强制将上游最新改动合并，遇到冲突直接以上游代码覆盖
+          git checkout "$BRANCH"
+          git merge "upstream/$BRANCH" -X theirs --no-edit || {
+            echo "发生代码历史冲突，执行覆盖重置..."
+            git reset --hard "upstream/$BRANCH"
           }
 
-          # 6. 推送回你自己的仓库
-          git push origin "$DEFAULT_BRANCH" --force
+          # 强制推送到你自己的 GitHub 仓库
+          git push origin "$BRANCH" --force
