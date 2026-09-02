@@ -9,52 +9,44 @@ permissions:
   contents: write
 
 jobs:
-    sync:
-      runs-on: ubuntu-latest
-      steps:
-        - name: Checkout target repo
-          uses: actions/checkout@v4
-          with:
-            fetch-depth: 0
-            persist-credentials: false
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-        - name: Sync Upstream
-          env:
-            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          run: |
-            # 1. 配置 Git 机器人身份
-            git config --global user.name 'github-actions[bot]'
-            git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+      - name: Sync Upstream
+        run: |
+          # 1. 配置 Git 机器人身份
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-            # 2. 赋予 origin 远程仓库推送权限（核心修复点）
-            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          # 2. 通过 API 精准提取原作者仓库地址
+          REPO_INFO=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}")
+          UPSTREAM_URL=$(echo "$REPO_INFO" | jq -r '.parent.clone_url // empty')
 
-            # 3. 自动通过 GitHub API 获取原作者的上游仓库地址
-            UPSTREAM_URL=$(gh api repos/${{ github.repository }} --jq '.parent.clone_url' 2>/dev/null || true)
-            
-            if [ -z "$UPSTREAM_URL" ] || [ "$UPSTREAM_URL" == "null" ]; then
-              echo "错误：未能自动获取上游地址，请确认此仓库是通过 Fork 创建的。"
-              exit 1
-            fi
+          if [ -z "$UPSTREAM_URL" ]; then
+            echo "错误：未能识别到上游仓库，请确认此仓库是通过 Fork 创建的。"
+            exit 1
+          fi
 
-            # 4. 获取当前仓库分支名称（兼容 main / master）
-            BRANCH=$(git rev-parse --abbrev-ref HEAD)
-            echo "当前同步分支: $BRANCH"
-            echo "上游仓库地址: $UPSTREAM_URL"
+          echo "识别到上游地址: $UPSTREAM_URL"
 
-            # 5. 添加上游并拉取最新代码
-            git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
-            git fetch upstream
+          # 3. 配置带 Token 的远程推送链接
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
 
-            # 6. 获取上游默认分支名称
-            UPSTREAM_BRANCH=$(git remote show upstream | sed -n '/HEAD branch/s/.*: //p')
+          # 4. 拉取上游最新代码
+          git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
+          git fetch upstream
 
-            # 7. 强制合并，遇冲突时优先采用上游代码并覆盖
-            git checkout "$BRANCH"
-            git merge "upstream/$UPSTREAM_BRANCH" -X theirs --no-edit || {
-              echo "检测到代码冲突，执行强制覆盖重置..."
-              git reset --hard "upstream/$UPSTREAM_BRANCH"
-            }
+          # 5. 识别分支并强制对齐覆盖
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          UPSTREAM_BRANCH=$(git remote show upstream | sed -n '/HEAD branch/s/.*: //p')
 
-            # 8. 带 Token 凭证成功推送到你的仓库
-            git push origin "$BRANCH" --force
+          git checkout "$BRANCH"
+          git reset --hard "upstream/$UPSTREAM_BRANCH"
+
+          # 6. 强行推送到你的仓库
+          git push origin "$BRANCH" --force
