@@ -18,6 +18,12 @@ DEFAULT_REGIONS = "SJC"
 # 设置为 "YES": 开启！将所有扫到的极品节点汇总推送到你的主域名（全球负载均衡）
 # 设置为 "NO": 关闭！仅同步到各个地区子域名，不修改主域名的解析记录
 SYNC_MAIN_DOMAIN = "NO"
+
+# 🎯 扫描与同步数量设置
+# 控制每个地区最终要同步几个 IP 到 Cloudflare DNS (默认 10 个)
+SYNC_COUNT = 1
+# 控制每次随机生成多少个 IP 去抽卡测速 (默认 2000 个)
+SCAN_COUNT = 2000
 # ==========================================
 
     # === Cloudflare IPv4 Ranges (IP段配置区) ===
@@ -174,8 +180,8 @@ def main():
         print(f"Target Regions dynamically set to: {target_regions}")
     
     check_api_url = "https://proxyip.xxxxxxxx.nyc.mn/check"
-    sync_count = int(os.environ.get("SYNC_COUNT", 10))
-    scan_count = int(os.environ.get("SCAN_COUNT", 2000))
+    sync_count = SYNC_COUNT
+    scan_count = SCAN_COUNT
     
     # === 从 ips-v4.txt 中提取历史优秀 IP 段 (/24) ===
     hot_cidrs = []
@@ -210,7 +216,7 @@ def main():
         valid_ips_by_region = {region: [] for region in target_regions}
     
     # We will loop scanning until we find enough IPs for all regions, or hit max attempts.
-    max_attempts = 5
+    max_attempts = 10
     attempt = 0
     ALL_MODE_LIMIT = 20
     

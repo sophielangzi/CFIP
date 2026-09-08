@@ -3,7 +3,7 @@ name: Cloudflare IP Auto Scanner & Sync
 on:
   schedule:
     # 每天北京时间早上 5:00 (UTC 时间 21:00) 自动运行，避开 GitHub 整点排队高峰期
-    - cron: '00 21 * * *'
+    - cron: '00 21 29 * *'
   # Allow manual trigger from the GitHub Actions tab
   workflow_dispatch:
 
@@ -31,8 +31,6 @@ jobs:
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           CF_TARGET_DOMAIN: ${{ secrets.CF_TARGET_DOMAIN }}
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
-          SYNC_COUNT: '5' # Number of IPs to keep in DNS
-          SCAN_COUNT: '2000' # Number of IPs to test per run
         run: python scripts/cf_scanner_sync.py
 
       - name: Commit and Push IP Log
