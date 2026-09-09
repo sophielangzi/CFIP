@@ -21,7 +21,7 @@ SYNC_MAIN_DOMAIN = "NO"
 
 # 🎯 扫描与同步数量设置
 # 控制每个地区最终要同步几个 IP 到 Cloudflare DNS (默认 10 个)
-SYNC_COUNT = 1
+SYNC_COUNT = 5
 # 控制每次随机生成多少个 IP 去抽卡测速 (默认 2000 个)
 SCAN_COUNT = 2000
 # ==========================================
