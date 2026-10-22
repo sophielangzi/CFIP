@@ -21,7 +21,7 @@ SYNC_MAIN_DOMAIN = "NO"
 
 # 🎯 扫描与同步数量设置
 # 控制每个地区最终要同步几个 IP 到 Cloudflare DNS (默认 10 个)
-SYNC_COUNT = 5
+SYNC_COUNT = 20
 # 控制 ALL 全局模式下，最终要扫出多少个 IP 才停止 (默认 200 个)
 ALL_MODE_LIMIT = 10
 # ========================================
