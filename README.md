@@ -9,7 +9,7 @@
 
 ### 1. 配置 GitHub Secrets (必须)
 要想让脚本正常运行，你需要进入你的 GitHub 仓库：
-点击右上角的 **Settings** -> **Secrets and variables** -> **Actions** -> **New repository secret**，依次添加以下 4 个环境变量：
+点击右上角的 **Settings** -> **Secrets and variables** -> **Actions** -> **New repository secret**，依次添加以下 5 个环境变量：
 
 | Secret 名称 | 说明 | 示例 |
 | --- | --- | --- |
@@ -17,8 +17,41 @@
 | `CF_API_TOKEN` | Cloudflare 的 Global API Key (全局 API 密钥) | `8a9b...` |
 | `CF_ZONE_ID` | 你域名的 区域 ID (在 CF 域名概述页面右下角，32位字符串) | `9841...` |
 | `CF_TARGET_DOMAIN` | 你的主域名（程序不仅会将所有神仙 IP 同步到主域名，还会根据地区自动拼接子域名，如 `sjc.yourdomain.com`） | `yourdomain.com` |
+| `CHECK_API_URL` | 验活接口的**域名**（只存 Secrets，不写进代码；只填域名就行） | `your-check-host.pages.dev` |
 
 配置好后，你可以点击仓库顶部的 **Actions** -> 选中 **Cloudflare IP Auto Scanner & Sync** -> 点击 **Run workflow** 来手动触发一次运行，检查是否正常。
+
+### 2. `CHECK_API_URL` 怎么填（验活接口说明）
+
+本仓库**不内置任何验活接口地址**，代码里没有写死地址，唯一入口就是上面这个 Secret。所以：
+
+- **Fork 本仓库后，必须填你自己的验活接口地址**，不填程序会直接报错停跑（日志里会出现 `Error: CHECK_API_URL is not set ... Aborting.`），这是正常现象，不是程序坏了。
+- **填法**：Secret 名称 `CHECK_API_URL`，**值只填你自己验活接口的域名就行**，例如 `your-check-host.pages.dev`——不用带 `https://`、不用带 `/check`、不用带 `?proxyip=`，脚本会自动拼成完整的验活地址。（万一填了完整地址也能自动识别，不影响使用。）以后换接口，改这一个 Secret 的域名即可，代码不用动。
+- **接口协议要求**（你自己的接口需满足这个格式，脚本才认）：
+
+  - 请求（脚本用你填的域名自动拼出）：`GET https://<你填的域名>/check?proxyip=<要测的IP>`
+  - 返回 JSON 示例：
+
+    ```json
+    {"success": true, "dataCenter": "SJC", "latencyMs": 19}
+    ```
+
+  - 字段说明：`success` 必须为 `true` 才算这个 IP 可用；`dataCenter`（或 `colo`）是机场三字码（如 `SJC`、`LAX`），脚本靠它筛选地区；`latencyMs`（或 `tcpDuration`）是延迟毫秒数，可选，不返回时脚本用整个请求的耗时代替。
+- **先自测再填**：在浏览器里打开 `https://<你的域名>/check?proxyip=1.1.1.1`，能返回带 `success` 字段的 JSON，就说明接口格式对，把这个域名填进 Secret 即可。
+
+### 3. 没有自己的验活接口？先搭一个（接口搭建代码）
+
+验活接口的搭建代码是现成的，在这个仓库里：**https://github.com/onlyoyrao999/Cloudflare-proxyAPI**
+
+- 仓库里有两个版本：根目录 `_worker.js` 是基础版（`/check` 只返回国家级粗分）；`精准分区用这个.js` 是精准版（内置全球 237 个机房字典，`/check` 返回 `dataCenter`，能精确到 `SJC`、`LAX` 这种机房码）。**本扫描器要按地区筛 IP，用精准版**：部署前把 `精准分区用这个.js` 的内容替换根目录 `_worker.js` 即可。
+- **部署步骤**（Cloudflare Pages）：
+  1. 打开 Cloudflare 控制台 -> **Workers & Pages** -> **Create** -> **Pages**，选 **Connect to Git** 连上 `Cloudflare-proxyAPI` 仓库（或用 Upload 直接上传该仓库文件），分支 `main`、构建命令和输出目录都留空。
+  2. 部署完成后你会得到一个 `xxx.pages.dev` 域名，这就是你自己的验活接口域名。
+  3. 自测：浏览器打开 `https://<你的域名>/check?proxyip=1.1.1.1`，返回带 `success` 和 `dataCenter` 的 JSON 就说明搭好了。
+  4. 回到本仓库，按上一节把这个**域名**填进 Secret `CHECK_API_URL`（只填域名），完事。
+- **注意**：接口必须部署在 **Pages / Workers** 上，**不要部署到 Snippets**——Snippets 环境禁用了 TCP `connect()`，接口会回 502（`connect() is not available in Snippets`）、所有 IP 都验不了活。另外 `/check` 只测纯 IP，正好对上本扫描器（脚本喂进去的都是纯 IP）。
+
+- **和另外 4 个 Secret 的区别**：`CF_EMAIL` / `CF_API_TOKEN` / `CF_ZONE_ID` / `CF_TARGET_DOMAIN` 不填只是跳过 DNS 同步、扫描照常进行；只有 `CHECK_API_URL` 是硬性必填，不填不扫。
 
 ---
 
@@ -60,7 +93,7 @@ ALL_MODE_LIMIT = 10
 ```
 - **精准筛选模式**：填入你想要的机场码（如 `SJC,LAX,HKG`），系统会严格执行筛选标准，并**自动分配同步到各自的子域名**（如 `sjc.你的主域名`）。
 - **盲扫模式 (ALL)**：直接填 `"ALL"`！系统会在全网疯狂盲扫，只要凑够设定的数量（`ALL_MODE_LIMIT`，默认10个）瞬间光速收网！**在此模式下，扫到的 IP 只会全部统一同步到 `CF_TARGET_DOMAIN` 设置的主域名，不会自动创建地区子域名。**
-- **免配置测速模式**：如果你只是想体验极致的测速快感，或者没有 Cloudflare 域名。没关系！**不配置环境变量也可以直接运行！** 程序会自动跳过 DNS 同步。
+- **免配置测速模式**：如果你只是想体验测速、或者没有 Cloudflare 域名，可以只填 `CHECK_API_URL` 这一个 Secret，不填那 4 个 Cloudflare 的 Secret 也能运行，程序会自动跳过 DNS 同步、只输出扫描结果。注意 `CHECK_API_URL` 本身是必填的（见上方第 2 节），不填会直接停跑。
 
 ### ⚡ 4. 扫描逻辑与同步数量设置 (全在 Python 里设置)
 打开 `scripts/cf_scanner_sync.py`，你会在刚刚那个全局设置的下方看到这两个参数：
